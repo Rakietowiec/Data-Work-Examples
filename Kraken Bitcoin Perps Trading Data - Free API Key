@@ -1,0 +1,471 @@
+{
+  "nbformat": 4,
+  "nbformat_minor": 0,
+  "metadata": {
+    "colab": {
+      "provenance": [],
+      "authorship_tag": "ABX9TyM40Qz+DQ82Sw+9Hz2uT2Zv",
+      "include_colab_link": true
+    },
+    "kernelspec": {
+      "name": "python3",
+      "display_name": "Python 3"
+    },
+    "language_info": {
+      "name": "python"
+    }
+  },
+  "cells": [
+    {
+      "cell_type": "markdown",
+      "metadata": {
+        "id": "view-in-github",
+        "colab_type": "text"
+      },
+      "source": [
+        "<a href=\"https://colab.research.google.com/github/Rakietowiec/Data-Work-Examples/blob/main/Kraken%20Bitcoin%20Perps%20Trading%20Data%20-%20Free%20API%20Key\" target=\"_parent\"><img src=\"https://colab.research.google.com/assets/colab-badge.svg\" alt=\"Open In Colab\"/></a>"
+      ]
+    },
+    {
+      "cell_type": "code",
+      "execution_count": 1,
+      "metadata": {
+        "id": "s5MvbdxSYS-Z"
+      },
+      "outputs": [],
+      "source": [
+        "# Ensure RAPIDS stays happy by pinning PyArrow <20\n",
+        "!pip uninstall -y -q pyarrow\n",
+        "!pip install -q --upgrade \\\n",
+        "    \"polars>=1.21,<1.22\" \\\n",
+        "    \"pyarrow>=14,<20\" \\\n",
+        "    tardis-dev aiohttp nest_asyncio tqdm\n",
+        "\n"
+      ]
+    },
+    {
+      "cell_type": "code",
+      "source": [
+        "import nest_asyncio, polars as pl\n",
+        "from pathlib import Path\n",
+        "from datetime import date, datetime\n",
+        "from tardis_dev import datasets, get_exchange_details\n",
+        "\n",
+        "nest_asyncio.apply()\n",
+        "\n",
+        "# ── constants\n",
+        "EXCHANGE = \"cryptofacilities\"      # Kraken Futures via Tardis\n",
+        "SYMBOL   = \"PF_XBTUSD\"             # linear BTC perpetual\n",
+        "DATA_DIR = Path(\"/content/ticks\")\n",
+        "PARQ_DIR = Path(\"/content/parquet\")\n",
+        "DATA_DIR.mkdir(exist_ok=True)\n",
+        "PARQ_DIR.mkdir(exist_ok=True)\n",
+        "\n",
+        "# ── discover first tick\n",
+        "meta  = get_exchange_details(EXCHANGE)\n",
+        "start = next(\n",
+        "    datetime.fromisoformat(s[\"availableSince\"][:-1]).date()\n",
+        "    for s in meta[\"datasets\"][\"symbols\"]\n",
+        "    if s[\"id\"] == SYMBOL\n",
+        ")\n",
+        "print(f\"{SYMBOL} first tick: {start}\")   # e.g. 2022-03-22\n",
+        "\n"
+      ],
+      "metadata": {
+        "colab": {
+          "base_uri": "https://localhost:8080/"
+        },
+        "id": "TPdA7_4MjFWG",
+        "outputId": "9a907f53-3777-47be-a43d-8e544cc6c727"
+      },
+      "execution_count": 2,
+      "outputs": [
+        {
+          "output_type": "stream",
+          "name": "stdout",
+          "text": [
+            "PF_XBTUSD first tick: 2022-03-22\n"
+          ]
+        }
+      ]
+    },
+    {
+      "cell_type": "code",
+      "source": [
+        "start_free = date(2022, 4, 1)  # first free bundle\n",
+        "months = (\n",
+        "    pl.date_range(\n",
+        "        start_free,\n",
+        "        date.today().replace(day=1),\n",
+        "        \"1mo\",\n",
+        "        eager=True\n",
+        "    )\n",
+        "    .to_list()\n",
+        ")\n",
+        "print(f\"{len(months)} monthly bundles ({months[0]} → {months[-1]})\")\n",
+        "\n"
+      ],
+      "metadata": {
+        "colab": {
+          "base_uri": "https://localhost:8080/"
+        },
+        "id": "3_Kv09eFaqlt",
+        "outputId": "b9b2944c-a742-48c5-b262-64eeb14beeda"
+      },
+      "execution_count": 3,
+      "outputs": [
+        {
+          "output_type": "stream",
+          "name": "stdout",
+          "text": [
+            "39 monthly bundles (2022-04-01 → 2025-06-01)\n"
+          ]
+        }
+      ]
+    },
+    {
+      "cell_type": "code",
+      "source": [
+        "def fetch_monthly(symbol: str, month_dates):\n",
+        "    for m in month_dates:\n",
+        "        tag = m.strftime(\"%Y-%m-%d\")\n",
+        "        out = DATA_DIR / f\"{symbol}-{tag}.csv.gz\"\n",
+        "        if out.exists():\n",
+        "            continue\n",
+        "        print(\"⏬\", tag)\n",
+        "        datasets.download(\n",
+        "            exchange     = EXCHANGE,\n",
+        "            symbols      = [symbol],\n",
+        "            data_types   = [\"trades\"],\n",
+        "            from_date    = tag,\n",
+        "            to_date      = tag,\n",
+        "            download_dir = DATA_DIR,\n",
+        "        )\n",
+        "    print(\"✓ all monthly .csv.gz downloaded\")\n",
+        "\n",
+        "fetch_monthly(SYMBOL, months)\n",
+        "\n"
+      ],
+      "metadata": {
+        "colab": {
+          "base_uri": "https://localhost:8080/"
+        },
+        "id": "6iub3VrEaved",
+        "outputId": "b70da101-69ac-4631-dbdb-5b77e7529dec"
+      },
+      "execution_count": 4,
+      "outputs": [
+        {
+          "output_type": "stream",
+          "name": "stdout",
+          "text": [
+            "⏬ 2022-04-01\n",
+            "⏬ 2022-05-01\n",
+            "⏬ 2022-06-01\n",
+            "⏬ 2022-07-01\n",
+            "⏬ 2022-08-01\n",
+            "⏬ 2022-09-01\n",
+            "⏬ 2022-10-01\n",
+            "⏬ 2022-11-01\n",
+            "⏬ 2022-12-01\n",
+            "⏬ 2023-01-01\n",
+            "⏬ 2023-02-01\n",
+            "⏬ 2023-03-01\n",
+            "⏬ 2023-04-01\n",
+            "⏬ 2023-05-01\n",
+            "⏬ 2023-06-01\n",
+            "⏬ 2023-07-01\n",
+            "⏬ 2023-08-01\n",
+            "⏬ 2023-09-01\n",
+            "⏬ 2023-10-01\n",
+            "⏬ 2023-11-01\n",
+            "⏬ 2023-12-01\n",
+            "⏬ 2024-01-01\n",
+            "⏬ 2024-02-01\n",
+            "⏬ 2024-03-01\n",
+            "⏬ 2024-04-01\n",
+            "⏬ 2024-05-01\n",
+            "⏬ 2024-06-01\n",
+            "⏬ 2024-07-01\n",
+            "⏬ 2024-08-01\n",
+            "⏬ 2024-09-01\n",
+            "⏬ 2024-10-01\n",
+            "⏬ 2024-11-01\n",
+            "⏬ 2024-12-01\n",
+            "⏬ 2025-01-01\n",
+            "⏬ 2025-02-01\n",
+            "⏬ 2025-03-01\n",
+            "⏬ 2025-04-01\n",
+            "⏬ 2025-05-01\n",
+            "⏬ 2025-06-01\n",
+            "✓ all monthly .csv.gz downloaded\n"
+          ]
+        }
+      ]
+    },
+    {
+      "cell_type": "code",
+      "source": [
+        "from pathlib import Path\n",
+        "import polars as pl, gzip, glob\n",
+        "\n",
+        "def csv_to_daily_parquet(csv_path: Path):\n",
+        "    print(\"Converting\", csv_path.name)\n",
+        "    with gzip.open(csv_path, \"rt\") as fh:\n",
+        "        df = pl.read_csv(\n",
+        "            fh,\n",
+        "            columns=[\"timestamp\",\"price\",\"amount\",\"side\"],\n",
+        "            try_parse_dates=False,\n",
+        "            schema_overrides={\n",
+        "                \"timestamp\": pl.Utf8,\n",
+        "                \"price\": pl.Float64,\n",
+        "                \"amount\": pl.Float64,\n",
+        "            }\n",
+        "        )\n",
+        "    # parse ts: digits→epoch micros; else strptime\n",
+        "    is_digits = pl.col(\"timestamp\").str.contains(r\"^[0-9]+$\")\n",
+        "    ts_expr = (\n",
+        "        pl.when(is_digits)\n",
+        "          .then(pl.col(\"timestamp\").cast(pl.Int64).cast(pl.Datetime))\n",
+        "          .otherwise(\n",
+        "              pl.col(\"timestamp\")\n",
+        "                .str.strptime(pl.Datetime, \"%Y-%m-%d %H:%M:%S%.6f\", strict=False)\n",
+        "          )\n",
+        "          .alias(\"ts\")\n",
+        "    )\n",
+        "    df = (\n",
+        "        df.with_columns(ts_expr)\n",
+        "          .drop(\"timestamp\")\n",
+        "          .select([\"ts\",\"price\",pl.col(\"amount\").alias(\"size\"),\"side\"])\n",
+        "          .sort(\"ts\")\n",
+        "    )\n",
+        "    # write one parquet per calendar-day\n",
+        "    for day in df[\"ts\"].dt.date().unique().to_list():\n",
+        "        out = PARQ_DIR / f\"{day}.parquet\"\n",
+        "        if not out.exists():\n",
+        "            df.filter(pl.col(\"ts\").dt.date() == day) \\\n",
+        "              .write_parquet(out, compression=\"snappy\")\n",
+        "\n",
+        "# walk all CSV bundles\n",
+        "for gz in Path(DATA_DIR).rglob(\"*.csv.gz\"):\n",
+        "    csv_to_daily_parquet(gz)\n",
+        "\n",
+        "print(\"✓ Parquet files:\", len(glob.glob(str(PARQ_DIR/\"*.parquet\"))))\n"
+      ],
+      "metadata": {
+        "colab": {
+          "base_uri": "https://localhost:8080/"
+        },
+        "id": "uImIvzJUgUaZ",
+        "outputId": "d56adab8-1a42-45b2-92c4-cdee06ec6f34"
+      },
+      "execution_count": 5,
+      "outputs": [
+        {
+          "output_type": "stream",
+          "name": "stdout",
+          "text": [
+            "Converting cryptofacilities_trades_2024-10-01_PF_XBTUSD.csv.gz\n",
+            "Converting cryptofacilities_trades_2022-07-01_PF_XBTUSD.csv.gz\n",
+            "Converting cryptofacilities_trades_2024-09-01_PF_XBTUSD.csv.gz\n",
+            "Converting cryptofacilities_trades_2022-05-01_PF_XBTUSD.csv.gz\n",
+            "Converting cryptofacilities_trades_2024-04-01_PF_XBTUSD.csv.gz\n",
+            "Converting cryptofacilities_trades_2023-04-01_PF_XBTUSD.csv.gz\n",
+            "Converting cryptofacilities_trades_2023-09-01_PF_XBTUSD.csv.gz\n",
+            "Converting cryptofacilities_trades_2025-04-01_PF_XBTUSD.csv.gz\n",
+            "Converting cryptofacilities_trades_2023-08-01_PF_XBTUSD.csv.gz\n",
+            "Converting cryptofacilities_trades_2024-07-01_PF_XBTUSD.csv.gz\n",
+            "Converting cryptofacilities_trades_2023-12-01_PF_XBTUSD.csv.gz\n",
+            "Converting cryptofacilities_trades_2024-08-01_PF_XBTUSD.csv.gz\n",
+            "Converting cryptofacilities_trades_2022-06-01_PF_XBTUSD.csv.gz\n",
+            "Converting cryptofacilities_trades_2023-07-01_PF_XBTUSD.csv.gz\n",
+            "Converting cryptofacilities_trades_2023-05-01_PF_XBTUSD.csv.gz\n",
+            "Converting cryptofacilities_trades_2022-12-01_PF_XBTUSD.csv.gz\n",
+            "Converting cryptofacilities_trades_2023-06-01_PF_XBTUSD.csv.gz\n",
+            "Converting cryptofacilities_trades_2024-12-01_PF_XBTUSD.csv.gz\n",
+            "Converting cryptofacilities_trades_2025-02-01_PF_XBTUSD.csv.gz\n",
+            "Converting cryptofacilities_trades_2022-11-01_PF_XBTUSD.csv.gz\n",
+            "Converting cryptofacilities_trades_2023-01-01_PF_XBTUSD.csv.gz\n",
+            "Converting cryptofacilities_trades_2023-02-01_PF_XBTUSD.csv.gz\n",
+            "Converting cryptofacilities_trades_2024-11-01_PF_XBTUSD.csv.gz\n",
+            "Converting cryptofacilities_trades_2024-03-01_PF_XBTUSD.csv.gz\n",
+            "Converting cryptofacilities_trades_2022-09-01_PF_XBTUSD.csv.gz\n",
+            "Converting cryptofacilities_trades_2025-03-01_PF_XBTUSD.csv.gz\n",
+            "Converting cryptofacilities_trades_2023-11-01_PF_XBTUSD.csv.gz\n",
+            "Converting cryptofacilities_trades_2022-08-01_PF_XBTUSD.csv.gz\n",
+            "Converting cryptofacilities_trades_2023-03-01_PF_XBTUSD.csv.gz\n",
+            "Converting cryptofacilities_trades_2024-01-01_PF_XBTUSD.csv.gz\n",
+            "Converting cryptofacilities_trades_2022-10-01_PF_XBTUSD.csv.gz\n",
+            "Converting cryptofacilities_trades_2025-06-01_PF_XBTUSD.csv.gz\n",
+            "Converting cryptofacilities_trades_2022-04-01_PF_XBTUSD.csv.gz\n",
+            "Converting cryptofacilities_trades_2024-05-01_PF_XBTUSD.csv.gz\n",
+            "Converting cryptofacilities_trades_2024-02-01_PF_XBTUSD.csv.gz\n",
+            "Converting cryptofacilities_trades_2025-05-01_PF_XBTUSD.csv.gz\n",
+            "Converting cryptofacilities_trades_2024-06-01_PF_XBTUSD.csv.gz\n",
+            "Converting cryptofacilities_trades_2023-10-01_PF_XBTUSD.csv.gz\n",
+            "Converting cryptofacilities_trades_2025-01-01_PF_XBTUSD.csv.gz\n",
+            "✓ Parquet files: 39\n"
+          ]
+        }
+      ]
+    },
+    {
+      "cell_type": "code",
+      "source": [
+        "import pandas as pd\n",
+        "from pathlib import Path\n",
+        "import polars as pl\n",
+        "\n",
+        "SECOND_DIR = Path(\"/content/secondbars\")\n",
+        "SECOND_DIR.mkdir(exist_ok=True)\n",
+        "\n",
+        "for pq in sorted(PARQ_DIR.glob(\"*.parquet\")):\n",
+        "    day = pq.stem                              # e.g. \"2022-04-01\"\n",
+        "    out = SECOND_DIR / f\"{day}.parquet\"\n",
+        "    if out.exists():\n",
+        "        continue\n",
+        "\n",
+        "    # 1) Load that day's ticks into Pandas\n",
+        "    df = pl.read_parquet(pq).to_pandas()\n",
+        "    df['ts'] = pd.to_datetime(df['ts'], utc=True)\n",
+        "    df.set_index('ts', inplace=True)\n",
+        "\n",
+        "    # 2) Resample to 1s bars\n",
+        "    ohlc = df['price'].resample('1s').ohlc()\n",
+        "    volume   = df['size'].resample('1s').sum().rename('volume')\n",
+        "    n_trades = df['price'].resample('1s').count().rename('n_trades')\n",
+        "    bars_pd  = pd.concat([ohlc, volume, n_trades], axis=1).dropna(how='all')\n",
+        "\n",
+        "    # 3) Write back to Parquet (PyArrow engine)\n",
+        "    bars_pd.to_parquet(out)\n",
+        "    print(\"→ wrote bars for\", day)\n"
+      ],
+      "metadata": {
+        "id": "xRNyepyMhJcR"
+      },
+      "execution_count": 9,
+      "outputs": []
+    },
+    {
+      "cell_type": "code",
+      "source": [
+        "import polars as pl\n",
+        "from pathlib import Path\n",
+        "\n",
+        "SECOND_DIR = Path(\"/content/secondbars\")\n",
+        "\n",
+        "# 1) Lazy-scan your per-day bar files\n",
+        "bars_lf = pl.scan_parquet(str(SECOND_DIR / \"*.parquet\"))\n",
+        "\n",
+        "# 2) Compute total seconds covered (all, including zero-trade)\n",
+        "total = bars_lf.select(pl.len().alias(\"total_seconds\")).collect()\n",
+        "print(f\"Total seconds (incl. empty): {total['total_seconds'][0]:,}\")\n",
+        "\n",
+        "# 3) Filter to keep only seconds with at least one trade\n",
+        "trade_bars_lf = bars_lf.filter(pl.col(\"n_trades\") > 0)\n",
+        "\n",
+        "# 4) Preview the first 10 non-empty bars, with ts first\n",
+        "print(\n",
+        "    trade_bars_lf\n",
+        "      .select([\"ts\",\"open\",\"high\",\"low\",\"close\",\"volume\",\"n_trades\"])\n",
+        "      .limit(10)\n",
+        "      .collect()\n",
+        ")\n",
+        "\n",
+        "# 5) (Optional) count non-empty seconds\n",
+        "nonzero = trade_bars_lf.select(pl.len().alias(\"seconds_with_trades\")).collect()\n",
+        "print(f\"\\nSeconds with ≥1 trade: {nonzero['seconds_with_trades'][0]:,}\")\n"
+      ],
+      "metadata": {
+        "colab": {
+          "base_uri": "https://localhost:8080/"
+        },
+        "id": "oGvM_cr1ijR4",
+        "outputId": "2d0716ea-4154-4853-e98d-4e70ecf19214"
+      },
+      "execution_count": 11,
+      "outputs": [
+        {
+          "output_type": "stream",
+          "name": "stdout",
+          "text": [
+            "Total seconds (incl. empty): 3,364,570\n",
+            "shape: (10, 7)\n",
+            "┌─────────────────────────┬─────────┬─────────┬─────────┬─────────┬────────┬──────────┐\n",
+            "│ ts                      ┆ open    ┆ high    ┆ low     ┆ close   ┆ volume ┆ n_trades │\n",
+            "│ ---                     ┆ ---     ┆ ---     ┆ ---     ┆ ---     ┆ ---    ┆ ---      │\n",
+            "│ datetime[μs, UTC]       ┆ f64     ┆ f64     ┆ f64     ┆ f64     ┆ f64    ┆ i64      │\n",
+            "╞═════════════════════════╪═════════╪═════════╪═════════╪═════════╪════════╪══════════╡\n",
+            "│ 2022-04-01 00:00:02 UTC ┆ 45589.0 ┆ 45589.0 ┆ 45589.0 ┆ 45589.0 ┆ 0.0003 ┆ 1        │\n",
+            "│ 2022-04-01 00:00:55 UTC ┆ 45600.0 ┆ 45600.0 ┆ 45600.0 ┆ 45600.0 ┆ 0.0003 ┆ 1        │\n",
+            "│ 2022-04-01 00:01:55 UTC ┆ 45550.0 ┆ 45550.0 ┆ 45550.0 ┆ 45550.0 ┆ 0.0235 ┆ 1        │\n",
+            "│ 2022-04-01 00:01:59 UTC ┆ 45550.0 ┆ 45550.0 ┆ 45550.0 ┆ 45550.0 ┆ 0.0581 ┆ 1        │\n",
+            "│ 2022-04-01 00:02:02 UTC ┆ 45550.0 ┆ 45550.0 ┆ 45550.0 ┆ 45550.0 ┆ 0.0153 ┆ 1        │\n",
+            "│ 2022-04-01 00:02:31 UTC ┆ 45550.0 ┆ 45550.0 ┆ 45550.0 ┆ 45550.0 ┆ 0.0138 ┆ 1        │\n",
+            "│ 2022-04-01 00:03:26 UTC ┆ 45581.0 ┆ 45581.0 ┆ 45581.0 ┆ 45581.0 ┆ 0.0111 ┆ 1        │\n",
+            "│ 2022-04-01 00:12:43 UTC ┆ 45620.0 ┆ 45620.0 ┆ 45620.0 ┆ 45620.0 ┆ 0.1093 ┆ 1        │\n",
+            "│ 2022-04-01 00:12:53 UTC ┆ 45620.0 ┆ 45620.0 ┆ 45620.0 ┆ 45620.0 ┆ 0.0003 ┆ 1        │\n",
+            "│ 2022-04-01 00:12:54 UTC ┆ 45637.0 ┆ 45637.0 ┆ 45637.0 ┆ 45637.0 ┆ 0.1093 ┆ 1        │\n",
+            "└─────────────────────────┴─────────┴─────────┴─────────┴─────────┴────────┴──────────┘\n",
+            "\n",
+            "Seconds with ≥1 trade: 421,002\n"
+          ]
+        }
+      ]
+    },
+    {
+      "cell_type": "code",
+      "source": [
+        "import requests, pandas as pd\n",
+        "from datetime import datetime, timezone\n",
+        "import polars as pl\n",
+        "\n",
+        "# 1) Find the latest parquet file in SECOND_DIR\n",
+        "latest_file = sorted(SECOND_DIR.glob(\"*.parquet\"))[-1]\n",
+        "\n",
+        "# 2) Load that day’s bars, pick the last non-empty second\n",
+        "df = pl.read_parquet(latest_file).to_pandas()\n",
+        "df['ts'] = pd.to_datetime(df['ts'], utc=True)\n",
+        "recent = df[df['n_trades'] > 0].sort_values('ts').iloc[-1]\n",
+        "target_ts = recent['ts']\n",
+        "print(\"Local latest tick:\", recent['close'], recent['n_trades'], \"at\", target_ts)\n",
+        "\n",
+        "# 3) Fetch the same window via REST\n",
+        "since_ms = int(target_ts.timestamp() * 1000) - 500\n",
+        "url = \"https://futures.kraken.com/api/history/v3/market/PF_XBTUSD/executions\"\n",
+        "resp = requests.get(url, params={\"since\": since_ms})\n",
+        "data = resp.json()\n",
+        "\n",
+        "# 4) Extract the first execution\n",
+        "ex0 = data[\"elements\"][0][\"event\"][\"Execution\"][\"execution\"]\n",
+        "ex_ts = datetime.fromtimestamp(ex0[\"timestamp\"] / 1000, tz=timezone.utc)\n",
+        "print(\n",
+        "    \"Exchange execution:\",\n",
+        "    float(ex0[\"price\"]),\n",
+        "    float(ex0[\"quantity\"]),\n",
+        "    \"at\",\n",
+        "    ex_ts\n",
+        ")\n",
+        "\n"
+      ],
+      "metadata": {
+        "colab": {
+          "base_uri": "https://localhost:8080/"
+        },
+        "id": "2CcuziJU65Et",
+        "outputId": "addc33fa-ba63-403f-9538-a4dfd71b1261"
+      },
+      "execution_count": 42,
+      "outputs": [
+        {
+          "output_type": "stream",
+          "name": "stdout",
+          "text": [
+            "Local latest tick: 105714.0 2 at 2025-06-01 23:59:56+00:00\n",
+            "Exchange execution: 105537.0 0.01 at 2025-06-15 23:32:34.718000+00:00\n"
+          ]
+        }
+      ]
+    }
+  ]
+}
